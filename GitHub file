@@ -1,0 +1,161 @@
+/*
+Project: Security Home Monitor App (Full Stack)
+Stack: Node.js (Express) Backend, Blink API Integration, WebRTC, Alexa Skill
+*/
+
+// File: server.js (Node.js Backend Entry Point)
+const express = require('express');
+const cors = require('cors');
+const axios = require('axios');
+const http = require('http');
+const { Server } = require('socket.io');
+require('dotenv').config();
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST']
+  }
+});
+
+app.use(cors());
+app.use(express.json());
+
+let blinkSession = {}; // Store Blink auth session in memory
+
+// Login to Blink
+app.post('/api/blink/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const response = await axios.post('https://rest-prod.immedia-semi.com/login', { email, password });
+    const { authtoken, account, networks } = response.data;
+
+    blinkSession = {
+      authToken: authtoken.authtoken,
+      accountId: account.id,
+      networkId: networks[0].id
+    };
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Blink login failed', details: error.message });
+  }
+});
+
+// Get Blink Cameras
+app.get('/api/blink/cameras', async (req, res) => {
+  try {
+    const { authToken, networkId } = blinkSession;
+    const response = await axios.get(
+      `https://rest-prod.immedia-semi.com/network/${networkId}/cameras`,
+      { headers: { TOKEN_AUTH: authToken } }
+    );
+    res.json(response.data);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch cameras', details: error.message });
+  }
+});
+
+// WebRTC Signaling
+io.on('connection', (socket) => {
+  console.log('User connected:', socket.id);
+
+  socket.on('offer', (data) => socket.broadcast.emit('offer', data));
+  socket.on('answer', (data) => socket.broadcast.emit('answer', data));
+  socket.on('candidate', (data) => socket.broadcast.emit('candidate', data));
+});
+
+const PORT = process.env.PORT || 5000;
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+/*
+README.md
+=========
+
+# Security Home Monitor App
+
+A smart home security monitoring app built with Node.js, Blink API integration, WebRTC for live video feeds, and Alexa voice control.
+
+## Features
+- 🔐 Manage Blink camera systems
+- 🎥 HD Live video via WebRTC
+- 📡 Motion alerts & two-way audio (extendable)
+- 🗣️ Alexa Smart Home Skill integration
+
+## Setup
+1. Clone the repo
+2. Create a `.env` file:
+   ```env
+   PORT=5000
+   BLINK_EMAIL=your@email.com
+   BLINK_PASSWORD=yourpassword
+   ```
+3. Install dependencies:
+   ```bash
+   npm install
+   ```
+4. Start the server:
+   ```bash
+   node server.js
+   ```
+
+## API Endpoints
+- `POST /api/blink/login` – Authenticates with Blink
+- `GET /api/blink/cameras` – Lists connected Blink cameras
+
+## WebRTC Signaling
+Uses Socket.io for real-time communication.
+
+## Alexa Integration
+Deploy the handler in `alexa-skill/handler.js` to AWS Lambda, and link it to your Smart Home skill.
+
+---
+
+alexa-skill/handler.js
+=======================
+
+```js
+exports.handler = async (event) => {
+  const namespace = event.directive.header.namespace;
+  if (namespace === 'Alexa.Discovery') {
+    return {
+      event: {
+        header: {
+          namespace: 'Alexa.Discovery',
+          name: 'Discover.Response',
+          messageId: 'abc-123',
+          payloadVersion: '3'
+        },
+        payload: {
+          endpoints: [{
+            endpointId: 'smart_camera_1',
+            manufacturerName: 'Premium Media NG',
+            friendlyName: 'Front Door Camera',
+            description: 'Smart HD Camera',
+            displayCategories: ['CAMERA'],
+            cookie: {},
+            capabilities: [
+              {
+                type: 'AlexaInterface',
+                interface: 'Alexa.CameraStreamController',
+                version: '3',
+                cameraStreamConfigurations: [
+                  {
+                    protocols: ['RTSP'],
+                    resolutions: [{ width: 1280, height: 720 }],
+                    authorizationTypes: ['BASIC'],
+                    videoCodecs: ['H264'],
+                    audioCodecs: ['AAC']
+                  }
+                ]
+              }
+            ]
+          }]
+        }
+      }
+    };
+  }
+};
+```
