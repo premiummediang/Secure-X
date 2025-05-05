@@ -1,0 +1,86 @@
+import React, { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Switch } from '@/components/ui/switch';
+import { Input } from '@/components/ui/input';
+import { FaMicrophone, FaCamera, FaLock, FaUnlock } from 'react-icons/fa';
+import { motion } from 'framer-motion';
+
+const HomeSecurityMonitor = () => {
+  const [cameraFeeds, setCameraFeeds] = useState([]);
+  const [motionAlerts, setMotionAlerts] = useState(true);
+  const [isLocked, setIsLocked] = useState(true);
+  const [voiceInput, setVoiceInput] = useState('');
+
+  useEffect(() => {
+    // Simulate camera feed loading
+    setCameraFeeds([
+      { id: 1, name: 'Front Door', streamUrl: 'https://stream.frontdoor.example' },
+      { id: 2, name: 'Backyard', streamUrl: 'https://stream.backyard.example' },
+    ]);
+  }, []);
+
+  const toggleLock = () => {
+    setIsLocked(prev => !prev);
+    alert(isLocked ? 'Unlocked via voice command.' : 'Locked via voice command.');
+  };
+
+  const handleVoiceCommand = () => {
+    if (voiceInput.toLowerCase().includes('lock')) {
+      setIsLocked(true);
+    } else if (voiceInput.toLowerCase().includes('unlock')) {
+      setIsLocked(false);
+    }
+    setVoiceInput('');
+  };
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4">
+      {cameraFeeds.map(feed => (
+        <Card key={feed.id} className="rounded-2xl shadow-lg">
+          <CardContent className="p-4">
+            <h2 className="text-xl font-bold mb-2">{feed.name}</h2>
+            <div className="aspect-video bg-black text-white flex items-center justify-center">
+              <FaCamera className="text-4xl" /> HD Live View
+            </div>
+            <Button className="mt-3 w-full">
+              <FaMicrophone className="mr-2" /> Two-Way Audio
+            </Button>
+          </CardContent>
+        </Card>
+      ))}
+
+      <Card className="col-span-1 md:col-span-2 rounded-2xl shadow-lg">
+        <CardContent className="p-4">
+          <div className="flex justify-between items-center mb-4">
+            <span className="text-lg font-semibold">Motion Alerts</span>
+            <Switch checked={motionAlerts} onCheckedChange={setMotionAlerts} />
+          </div>
+
+          <div className="flex items-center gap-2 mb-4">
+            <Input
+              placeholder="Say 'lock' or 'unlock'"
+              value={voiceInput}
+              onChange={(e) => setVoiceInput(e.target.value)}
+            />
+            <Button onClick={handleVoiceCommand}>Voice Command</Button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-lg font-semibold">Door Status:</span>
+            <motion.div
+              key={isLocked ? 'locked' : 'unlocked'}
+              initial={{ scale: 0.8 }}
+              animate={{ scale: 1 }}
+              className={`p-2 rounded-full ${isLocked ? 'bg-green-500' : 'bg-red-500'}`}
+            >
+              {isLocked ? <FaLock className="text-white" /> : <FaUnlock className="text-white" />}
+            </motion.div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+export default HomeSecurityMonitor;
