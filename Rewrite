@@ -1,0 +1,834 @@
+*\*\*backend/server.js\*\*\*
+
+```javascript
+const express = require('express');
+const app = express();
+const server = require('http').createServer(app);
+const io = require('socket.io')(server);
+const { v4: uuidv4 } = require('uuid');
+// const blinkApi = require('./blinkApi'); //  Simulated for this example
+// const alexaSdk = require('./alexaSdk');  // Simulated for this example
+
+const PORT = process.env.PORT || 3001;
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Serve static files (in a real app, this would be your built React Native app)
+app.use(express.static('public')); //  You'd have a folder with static assets
+
+// Simulated Blink API functions (replace with actual Blink API calls)
+const blinkApi = {
+    getCameraList: async (account) => {
+        // Simulate fetching camera list
+        console.log("Simulating fetching camera list for account:", account);
+        return new Promise(resolve => {
+            setTimeout(() => {
+                resolve([
+                    { id: 'camera1', name: 'Front Door Camera', status: 'online' },
+                    { id: 'camera2', name: 'Backyard Camera', status: 'offline' },
+                    { id: 'camera3', name: 'Living Room Camera', status: 'online' },
+                ]);
+            }, 500); // Simulate network latency
+        });
+    },
+    getCameraStream: async (cameraId) => {
+        // Simulate getting a video stream URL
+        console.log("Simulating fetching stream for camera:", cameraId);
+        return new Promise(resolve => {
+            setTimeout(() => {
+                resolve(`stream_url_for_${cameraId}`); //  Return a dummy URL
+            }, 300);
+        });
+    },
+    getMotionAlertStatus: async (cameraId) => {
+      console.log(`Simulating fetching motion alert status for camera: ${cameraId}`);
+      return new Promise(resolve => {
+        setTimeout(() => {
+          resolve(true); // Or false, randomly
+        }, 200);
+      });
+    },
+    setMotionAlertStatus: async (cameraId, enabled) => {
+      console.log(`Simulating setting motion alert status for camera: ${cameraId} to ${enabled}`);
+      return new Promise(resolve => {
+        setTimeout(() => {
+          resolve({ success: true, cameraId, enabled });
+        }, 200);
+      });
+    },
+    lockDoor: async (doorId) => {
+        console.log("Simulating locking door:", doorId);
+        return new Promise(resolve => {
+            setTimeout(() => {
+                resolve({ success: true, doorId, status: 'locked' });
+            }, 400);
+        });
+    },
+};
+
+// Simulated Alexa SDK functions
+const alexaSdk = {
+    handleVoiceCommand: async (command) => {
+        console.log("Simulating handling Alexa command:", command);
+        //  Very basic command parsing for the example
+        if (command.includes('lock')) {
+            const doorId = command.split(' ')[1]; //  e.g., "lock front_door"
+            if (doorId) {
+                return await blinkApi.lockDoor(doorId);
+            } else {
+                return { success: false, error: 'Door ID not provided' };
+            }
+        } else if (command.includes('status')) {
+             const cameraName = command.split(' ')[2];
+             if(cameraName){
+                const cameras = await blinkApi.getCameraList("simulated_user"); //hardcoded user
+                const camera = cameras.find(c => c.name.toLowerCase().includes(cameraName.toLowerCase()));
+                if (camera) {
+                    const motionStatus = await blinkApi.getMotionAlertStatus(camera.id);
+                    return { success: true, cameraName: camera.name, status: camera.status, motionAlert: motionStatus };
+                }
+                else{
+                   return {success: false, error: "Camera not found"};
+                }
+
+             }
+             else{
+                return { success: false, error: 'Camera Name not provided'};
+             }
+        } else {
+            return { success: false, error: 'Command not recognized' };
+        }
+    },
+};
+
+
+
+// API endpoints (Express)
+app.get('/api/cameras/:account', async (req, res) => {
+    try {
+        const { account } = req.params;
+        const cameras = await blinkApi.getCameraList(account);
+        res.json(cameras);
+    } catch (error) {
+        console.error('Error fetching cameras:', error);
+        res.status(500).json({ error: 'Failed to fetch cameras' });
+    }
+});
+
+app.get('/api/stream/:cameraId', async (req, res) => {
+    try {
+        const { cameraId } = req.params;
+        const streamUrl = await blinkApi.getCameraStream(cameraId);
+        res.json({ url: streamUrl });
+    } catch (error) {
+        console.error('Error fetching stream URL:', error);
+        res.status(500).json({ error: 'Failed to fetch stream URL' });
+    }
+});
+
+app.post('/api/alexa', async (req, res) => {
+    try {
+        const { command } = req.body;
+        const result = await alexaSdk.handleVoiceCommand(command);
+        res.json(result);
+    } catch (error) {
+        console.error('Error handling Alexa command:', error);
+        res.status(500).json({ error: 'Failed to handle Alexa command' });
+    }
+});
+
+app.get('/api/motion/:cameraId', async (req, res) => {
+    try {
+      const { cameraId } = req.params;
+      const status = await blinkApi.getMotionAlertStatus(cameraId);
+      res.json({cameraId, status});
+    } catch (error) {
+       console.error("Error getting motion status", error);
+       res.status(500).json({error: "Failed to get Motion Status"});
+    }
+});
+
+app.post('/api/motion/:cameraId', async (req, res) => {
+    try {
+      const { cameraId } = req.params;
+      const { enabled } = req.body;
+      const result = await blinkApi.setMotionAlertStatus(cameraId, enabled);
+      res.json(result);
+    } catch (error) {
+      console.error("Error setting motion status", error);
+      res.status(500).json({error: "Failed to set motion status"});
+    }
+});
+
+
+// Socket.IO for real-time communication (e.g., motion alerts)
+io.on('connection', (socket) => {
+    console.log('Client connected:', socket.id);
+
+    //  Simulated motion detection (replace with actual camera event triggers)
+    const motionIntervals = {}; // Store intervals for each camera
+
+    socket.on('start-motion-detection', (cameraId) => {
+        console.log(`Starting motion detection simulation for camera: ${cameraId}`);
+        // Clear any existing interval for this camera
+        if (motionIntervals[cameraId]) {
+            clearInterval(motionIntervals[cameraId]);
+        }
+
+        motionIntervals[cameraId] = setInterval(() => {
+            // Simulate motion detection (replace with actual logic)
+            const motionDetected = Math.random() < 0.3; // 30% chance of motion
+            if (motionDetected) {
+                console.log(`Motion detected by camera: ${cameraId}`);
+                socket.emit('motion-alert', { cameraId }); // Send to *this* client
+                //  In a real app, you might also want to store this event
+            }
+        }, 3000); // Check for motion every 3 seconds
+    });
+
+    socket.on('stop-motion-detection', (cameraId) => {
+        console.log(`Stopping motion detection simulation for camera: ${cameraId}`);
+        if (motionIntervals[cameraId]) {
+            clearInterval(motionIntervals[cameraId]);
+            delete motionIntervals[cameraId]; // Remove the interval
+        }
+    });
+
+    socket.on('disconnect', () => {
+        console.log('Client disconnected:', socket.id);
+        //  Clear all motion detection intervals for this client
+        for (const cameraId in motionIntervals) {
+            clearInterval(motionIntervals[cameraId]);
+        }
+    });
+
+    socket.on('join-stream', (cameraId) => {
+      console.log(`Client ${socket.id} joining stream for camera ${cameraId}`);
+      // In a real application, you would:
+      // 1. Authenticate the user and check if they have permission to access this camera.
+      // 2.  Establish a WebRTC connection to the camera (or a media server that relays the stream).
+      // 3.  Send the necessary WebRTC offer/answer SDP messages to negotiate the connection.
+      //  For this example, we'll just send a dummy stream URL.
+      const streamUrl = `webrtc_stream_for_camera_${cameraId}_${uuidv4()}`; //Simulate unique URL
+      socket.emit('stream-ready', { cameraId, url: streamUrl });
+    });
+});
+
+//  Fallback route for any non-API requests (for Single Page Application) - important for React Native
+app.get('*', (req, res) => {
+    res.sendFile(path.resolve(__dirname, 'public', 'index.html'));
+});
+
+server.listen(PORT, () => {
+    console.log(`Server listening on port ${PORT}`);
+});
+```
+
+\*\*\*backend/package.json\*\*\*
+
+```json
+{
+  "name": "security-home-monitor-backend",
+  "version": "1.0.0",
+  "description": "Backend for Security Home Monitor App",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js" //  For development with hot reloading
+  },
+  "dependencies": {
+    "express": "^4.17.1",
+    "socket.io": "^4.0.0",
+    "uuid": "^8.3.2",
+    // "body-parser": "^1.19.0", // Included in Express.js
+    // "cors": "^2.8.5",  //  If you need to handle cross-origin requests
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.7" //  For development
+  }
+}
+```
+
+Frontend (React Native)
+-----------------------
+
+\*\*\*frontend/App.js\*\*\*
+
+```javascript
+import React, { useState, useEffect, useRef } from 'react';
+import {
+    StyleSheet,
+    Text,
+    View,
+    TouchableOpacity,
+    FlatList,
+    SafeAreaView,
+    Platform,
+    TextInput,
+} from 'react-native';
+import {
+    Camera,
+    Mic,
+    AlertCircle,
+    CheckCircle,
+    XCircle,
+    Video,
+    Zap,
+    Settings,
+    Lock,
+    Unlock,
+    Activity,
+    WifiOff
+} from 'lucide-react-native'; //  Use Lucide icons
+import { io } from 'socket.io-client';
+// import { WebView } from 'react-native-webview'; //  For simplified WebRTC -  consider react-native-webrtc
+import { Button } from './components/ui/button'; // Assuming you have shadcn components
+import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
+import { Switch } from './components/ui/switch';
+import { ScrollView } from 'react-native';
+
+const SERVER_URL = 'http://your_server_ip:3001'; // Replace with your server's IP or domain
+// const SERVER_URL = 'http://localhost:3001'; // For local testing
+
+const SecurityHomeMonitor = () => {
+    const [cameras, setCameras] = useState([]);
+    const [socket, setSocket] = useState(null);
+    const [motionAlerts, setMotionAlerts] = useState({}); // { [cameraId]: boolean }
+    const [alexaCommand, setAlexaCommand] = useState('');
+    const [alexaResponse, setAlexaResponse] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [streamUrl, setStreamUrl] = useState(null); // For the camera stream
+    const [selectedCamera, setSelectedCamera] = useState(null);
+    const [networkConnected, setNetworkConnected] = useState(true); // Simulate network connectivity
+
+    // const webViewRef = useRef(null); // Ref for the WebView
+
+    useEffect(() => {
+        // Initialize Socket.IO connection
+        const newSocket = io(SERVER_URL);
+        setSocket(newSocket);
+
+        // Fetch initial camera data
+        const fetchCameras = async () => {
+            try {
+                const response = await fetch(`${SERVER_URL}/api/cameras/myaccount`); //  Replace "myaccount"
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+                const data = await response.json();
+                setCameras(data);
+                // Fetch motion alert statuses on component mount
+                data.forEach(async (camera) => {
+                  try {
+                    const motionStatusResponse = await fetch(`${SERVER_URL}/api/motion/${camera.id}`);
+                    if(!motionStatusResponse.ok){
+                      throw new Error(`Failed to fetch motion status for ${camera.id}`);
+                    }
+                    const motionStatusData = await motionStatusResponse.json();
+                    setMotionAlerts(prev => ({...prev, [camera.id]: motionStatusData.status }));
+                  } catch(err){
+                     console.error("Error fetching motion status:", err);
+                     setNetworkConnected(false);
+                  }
+                });
+            } catch (error) {
+                console.error('Error fetching cameras:', error);
+                setNetworkConnected(false);
+            }
+        };
+
+        fetchCameras();
+
+        // Socket.IO event listeners
+        newSocket.on('connect', () => {
+            console.log('Connected to server');
+            setNetworkConnected(true);
+        });
+
+        newSocket.on('disconnect', () => {
+            console.log('Disconnected from server');
+            setNetworkConnected(false);
+        });
+
+        newSocket.on('motion-alert', (data) => {
+            // Handle motion alerts (e.g., show a notification)
+            console.log('Motion alert from camera:', data.cameraId);
+            //  You might use PushNotification.localNotification here
+            alert(`Motion detected by camera ${data.cameraId}!`); // Basic alert
+        });
+
+        newSocket.on('stream-ready', (data) => {
+          console.log(`Stream is ready for camera ${data.cameraId}: ${data.url}`);
+          setStreamUrl(data.url);
+          //  In a real app, you would use react-native-webrtc here, not a WebView
+          // if (webViewRef.current) {
+          //   webViewRef.current.postMessage(data.url, '*'); // Post the URL to the WebView
+          // }
+        });
+
+        return () => {
+            // Clean up Socket.IO connection on unmount
+            newSocket.disconnect();
+        };
+    }, []);
+
+    const handleViewStream = async (cameraId) => {
+        if (!socket) return;
+
+        setSelectedCamera(cameraId); // Set the selected camera
+        setStreamUrl(null); // Clear any previous URL
+        socket.emit('join-stream', cameraId);
+    };
+
+    const handleStopStream = () => {
+        setStreamUrl(null);
+        setSelectedCamera(null);
+    };
+
+    const handle голосовойЗапросAlexa = async () => {
+        if (!socket) return;
+        setLoading(true);
+        try {
+            const response = await fetch(`${SERVER_URL}/api/alexa`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ command: alexaCommand }),
+            });
+            if (!response.ok) {
+                throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+            const data = await response.json();
+            setAlexaResponse(JSON.stringify(data, null, 2)); // Pretty print
+        } catch (error) {
+            console.error('Error sending Alexa command:', error);
+            setAlexaResponse(`Error: ${error.message}`);
+            setNetworkConnected(false);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const toggleMotionAlert = async (cameraId) => {
+      if(!socket) return;
+
+      try{
+        const currentStatus = motionAlerts[cameraId] || false;
+        const response = await fetch(`${SERVER_URL}/api/motion/${cameraId}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ enabled: !currentStatus }),
+        });
+
+        if(!response.ok){
+          throw new Error("Failed to change motion alert status");
+        }
+        const data = await response.json();
+        setMotionAlerts(prev => ({...prev, [cameraId]: data.enabled }));
+
+        if(!currentStatus){
+           socket.emit('start-motion-detection', cameraId);
+        }
+        else{
+          socket.emit('stop-motion-detection', cameraId);
+        }
+
+      } catch (error){
+        console.error("Error toggling motion alert:", error);
+        setNetworkConnected(false);
+      }
+    };
+
+    const renderCameraItem = ({ item }) => (
+        <Card style={styles.cameraCard}>
+            <CardHeader>
+                <CardTitle style={styles.cameraTitle}>
+                    <Video style={styles.cameraIcon} />
+                    {item.name}
+                </CardTitle>
+            </CardHeader>
+            <CardContent>
+                <View style={styles.cameraInfo}>
+                    <Text style={styles.cameraStatus}>
+                        Status:
+                        <Text style={item.status === 'online' ? styles.online : styles.offline}>
+                            {item.status === 'online' ? ' Online' : ' Offline'}
+                        </Text>
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => toggleMotionAlert(item.id)}
+                      style={styles.motionAlertContainer}
+                    >
+                      <Text style={styles.motionAlertText}>Motion Alerts:</Text>
+                      <Switch
+                        value={motionAlerts[item.id] || false}
+                        onValueChange={() => toggleMotionAlert(item.id)}
+                        style={styles.motionSwitch}
+                      />
+                       {motionAlerts[item.id] ? (
+                        <CheckCircle size={16} color="green" />
+                      ) : (
+                        <XCircle size={16} color="red" />
+                      )}
+                    </TouchableOpacity>
+                </View>
+
+                <Button
+                  onPress={() => handleViewStream(item.id)}
+                  style={styles.viewStreamButton}
+                  disabled={item.status !== 'online'}
+                >
+                    {item.status === 'online' ? 'View Stream' : 'Camera Offline'}
+                </Button>
+            </CardContent>
+        </Card>
+    );
+
+    return (
+        <SafeAreaView style={styles.container}>
+            <ScrollView style={styles.scrollView}>
+            <View style={styles.header}>
+                <Text style={styles.title}>
+                    <Camera style={styles.headerIcon} />
+                    My Security Cameras
+                </Text>
+                {!networkConnected && (
+                    <View style={styles.networkError}>
+                        <WifiOff size={20} color="red" />
+                        <Text style={styles.networkErrorText}>
+                            No Network Connection
+                        </Text>
+                    </View>
+                )}
+            </View>
+
+            <FlatList
+                data={cameras}
+                renderItem={renderCameraItem}
+                keyExtractor={(item) => item.id}
+                style={styles.list}
+                ListEmptyComponent={() => (
+                    <Text style={styles.emptyListText}>No cameras found.</Text>
+                )}
+            />
+
+            {/* Alexa Integration Section */}
+            <Card style={styles.alexaCard}>
+                <CardHeader>
+                    <CardTitle style={styles.alexaTitle}>
+                        <Zap style={styles.alexaIcon} />
+                        Alexa Integration
+                    </CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <View style={styles.alexaInputContainer}>
+                        <TextInput
+                            style={styles.alexaInput}
+                            placeholder="Enter Alexa command (e.g., lock front_door)"
+                            value={alexaCommand}
+                            onChangeText={setAlexaCommand}
+                        />
+                        <Button
+                            onPress={handle голосовойЗапросAlexa}
+                            style={styles.alexaButton}
+                            disabled={loading}
+                        >
+                            {loading ? 'Loading...' : 'Send Command'}
+                        </Button>
+                    </View>
+                    <Text style={styles.alexaResponseTitle}>
+                        Alexa Response:
+                    </Text>
+                    <Text style={styles.alexaResponse}>
+                        {alexaResponse || 'No response yet.'}
+                    </Text>
+                </CardContent>
+            </Card>
+
+            {/* Camera Stream Modal (Simplified) */}
+            {streamUrl && selectedCamera && (
+                <View style={styles.streamModal}>
+                  <Card style={styles.streamCard}>
+                    <CardHeader>
+                       <CardTitle>
+                         Live Stream from Camera {selectedCamera}
+                       </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                    {/* Replace this WebView with react-native-webrtc */}
+                    {/* <WebView
+                        ref={webViewRef}
+                        style={styles.streamView}
+                        source={{ uri: `${SERVER_URL}/stream.html?url=${streamUrl}` }} // Use a simple HTML page
+                        // source={{ html: `<iframe src="${streamUrl}" width="100%" height="100%" frameborder="0" allowfullscreen="true"></iframe>` }}
+                        //  Use postMessage to communicate the stream URL to the WebView.
+                        onMessage={(event) => {
+                          console.log("Message from WebView", event.nativeEvent.data);
+                          // Handle messages from the WebView (if needed)
+                        }}
+                    /> */}
+                    <View style={styles.streamPlaceholder}>
+                       <Text>Live Stream Placeholder</Text>
+                       <Text>{streamUrl}</Text>
+                       {/* Replace this with a VideoView from react-native-webrtc */}
+                    </View>
+
+                    <Button onPress={handleStopStream} style={styles.stopStreamButton}>
+                        Stop Stream
+                    </Button>
+                    </CardContent>
+                   </Card>
+                </View>
+            )}
+            </ScrollView>
+        </SafeAreaView>
+    );
+};
+
+const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+        backgroundColor: '#f0f0f0',
+    },
+    scrollView: {
+      marginHorizontal: 8,
+    },
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: 16,
+        paddingBottom: 0,
+    },
+    headerIcon: {
+        width: 24,
+        height: 24,
+        marginRight: 8,
+        color: '#333',
+    },
+    title: {
+        fontSize: 24,
+        fontWeight: 'bold',
+        color: '#333',
+    },
+    list: {
+        marginTop: 16,
+    },
+    cameraCard: {
+        marginVertical: 8,
+        elevation: 3,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#ddd'
+    },
+    cameraTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#333',
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    cameraIcon: {
+        width: 20,
+        height: 20,
+        marginRight: 8,
+        color: '#007bff',
+    },
+    cameraInfo: {
+        marginBottom: 16,
+    },
+    cameraStatus: {
+        fontSize: 16,
+        color: '#555',
+    },
+    online: {
+        color: 'green',
+        fontWeight: 'bold',
+    },
+    offline: {
+        color: 'red',
+        fontWeight: 'bold',
+    },
+    viewStreamButton: {
+        backgroundColor: '#007bff',
+        color: 'white',
+        padding: 10,
+        borderRadius: 5,
+        textAlign: 'center',
+        fontWeight: 'bold',
+    },
+    alexaCard: {
+        marginVertical: 16,
+        elevation: 3,
+         borderRadius: 8,
+         borderWidth: 1,
+        borderColor: '#ddd'
+    },
+    alexaTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#333',
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    alexaIcon: {
+        width: 20,
+        height: 20,
+        marginRight: 8,
+        color: '#007bff',
+    },
+    alexaInputContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    alexaInput: {
+        flex: 1,
+        padding: 10,
+        borderWidth: 1,
+        borderColor: '#ccc',
+        borderRadius: 5,
+        marginRight: 10,
+        backgroundColor: '#fff',
+        color: '#333',
+    },
+    alexaButton: {
+        backgroundColor: '#28a745',
+        color: 'white',
+        padding: 10,
+        borderRadius: 5,
+        fontWeight: 'bold',
+    },
+    alexaResponseTitle: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        marginTop: 8,
+        color: '#333',
+    },
+    alexaResponse: {
+        marginTop: 8,
+        padding: 10,
+        backgroundColor: '#e9ecef',
+        borderRadius: 5,
+        color: '#333',
+        fontFamily: 'monospace',
+        fontSize: 14,
+    },
+    streamModal: {
+        position: 'absolute', //  Full screen overlay
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0,0,0,0.5)', // Semi-transparent background
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 10, // Ensure it's on top
+    },
+    streamView: {
+        width: '100%',
+        height: '100%',
+        aspectRatio: 16 / 9,
+    },
+    stopStreamButton: {
+        backgroundColor: '#dc3545',
+        color: 'white',
+        padding: 10,
+        borderRadius: 5,
+        marginTop: 10,
+        fontWeight: 'bold',
+        alignSelf: 'center',
+    },
+    emptyListText: {
+        textAlign: 'center',
+        color: '#777',
+        marginTop: 20,
+        fontSize: 16,
+    },
+    networkError: {
+        backgroundColor: '#ffe0e0',
+        padding: 10,
+        borderRadius: 5,
+        marginTop: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#ffb3b3',
+    },
+    networkErrorText: {
+        color: 'red',
+        marginLeft: 5,
+        fontWeight: 'bold',
+    },
+    streamPlaceholder: {
+      width: '100%',
+      aspectRatio: 16/9,
+      backgroundColor: '#ddd',
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderRadius: 8,
+    },
+    motionAlertContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: 8,
+    },
+    motionAlertText: {
+      marginRight: 8,
+      fontSize: 16,
+      color: '#555'
+    },
+    motionSwitch: {
+
+    },
+    streamCard: {
+      width: '90%',
+      maxWidth: 600,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: '#ccc',
+      backgroundColor: '#fff'
+    }
+});
+
+export default SecurityHomeMonitor;
+```
+
+\*\*\*frontend/package.json\*\*\*
+
+```json
+{
+  "name": "security-home-monitor-app",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "start": "react-native start",
+    "android": "react-native run-android",
+    "ios": "react-native run-ios",
+    "web": "expo start --web",
+    "eject": "expo eject"
+  },
+  "dependencies": {
+    "react": "18.2.0",
+    "react-native": "0.73.4",
+    "socket.io-client": "^4.0.0",
+    "react-native-webview": "13.6.3", //  For simplified WebRTC - consider react-native-webrtc
+    "@rneui/themed": "^4.0.0-rc.8",
+    "@rneui/base": "^4.0.0-rc.8",
+    "lucide-react-native": "^0.294.0",
+    "react-native-safe-area-context": "4.8.2",
+    "react-native-screens": "~3.29.0",
+    "expo-status-bar": "~1.11.1",
+    "@expo/webpack-config": "^19.0.0",
+    "react-dom": "18.2.0",
+    "expo": "^50.0.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.20.0"
+  },
+  "private": true
+}
